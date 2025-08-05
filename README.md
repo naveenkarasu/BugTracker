@@ -1,3 +1,4 @@
+
 # Bug Tracker Lite
 
 A comprehensive bug tracking application demonstrating enterprise-level development practices using .NET Core, Node.js, React, and modern DevOps tools.
@@ -129,3 +130,4 @@ This project is designed for collaborative development. Consider using:
 ## 🆘 Support
 
 For questions or issues, please create an issue in the repository or reach out to the development team. 
+
