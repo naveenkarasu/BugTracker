@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: bugtracker-postgres
+    environment:
+      POSTGRES_DB: bugtracker
+      POSTGRES_USER: bugtracker_user
+      POSTGRES_PASSWORD: bugtracker_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - bugtracker-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bugtracker_user -d bugtracker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # .NET Core API
+  api-dotnet:
+    build:
+      context: ./server-dotnet
+      dockerfile: Dockerfile
+    container_name: bugtracker-api-dotnet
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=bugtracker;Username=bugtracker_user;Password=bugtracker_password
+      - JWT__SecretKey=your-super-secret-jwt-key-change-in-production
+      - JWT__Issuer=bugtracker-api
+      - JWT__Audience=bugtracker-client
+    ports:
+      - "5000:5000"
+      - "5001:5001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bugtracker-network
+    volumes:
+      - ./server-dotnet:/app
+      - /app/bin
+      - /app/obj
+
+  # Node.js Socket.IO Service
+  socket-node:
+    build:
+      context: ./server-node
+      dockerfile: Dockerfile
+    container_name: bugtracker-socket-node
+    environment:
+      - NODE_ENV=development
+      - PORT=4000
+      - DATABASE_URL=postgresql://bugtracker_user:bugtracker_password@postgres:5432/bugtracker
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bugtracker-network
+    volumes:
+      - ./server-node:/app
+      - /app/node_modules
+
+  # React Frontend
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: bugtracker-client
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000
+      - REACT_APP_SOCKET_URL=http://localhost:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api-dotnet
+      - socket-node
+    networks:
+      - bugtracker-network
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: bugtracker-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - bugtracker-network
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: bugtracker-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - bugtracker-network
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  bugtracker-network:
+    driver: bridge 
